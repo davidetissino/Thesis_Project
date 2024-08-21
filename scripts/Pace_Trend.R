@@ -29,22 +29,23 @@ library(tictoc)
 theme_davide <- function() {
   theme_fivethirtyeight(base_family = 'avenir') %+replace%  
     theme(
-      text = element_text(family='avenir'), 
-      axis.title.x = element_text(size=17, margin=margin(t=15)),
-      axis.title.y = element_text(size=17, margin=margin(r=15), angle = 90),
-      axis.text.x = element_text(face='bold', size = 13),
-      axis.text.y = element_text(face='bold', size = 13), 
-      panel.background = element_rect('floralwhite'), 
-      plot.background = element_rect('floralwhite'),
-      plot.title = element_text(size=17, hjust = 0),
+      text = element_text(family='PT Mono'),
+      axis.title.x = element_text(color = 'black', margin = margin(t = 30, b =25), family = 'K2D', face = 'bold', size = 19), 
+      axis.title.y = element_text(angle = 90, color = 'black', margin = margin(r = 25, l = 15), family = 'K2D', face = 'bold', size = 19), 
+      axis.text = element_text(color = 'grey40', face = 'bold', size = 13),
+      panel.background = element_rect('grey98'), 
+      plot.background = element_rect('grey98'),
+      plot.title = element_text(margin = margin(b=30, t = 10), size = 35, hjust = 0.6, family = 'Proxima Nova', face = 'bold'),
       plot.subtitle=element_text(size=12, hjust = 0, vjust = -1), 
-      panel.grid.major = element_line(color='gray90', linetype = 'dashed'),
-      plot.margin = margin(.5, .5, .25, .5, "cm")
-    ) 
+      panel.grid.major = element_line(color='grey80', linetype = 'dashed'),
+      plot.margin = unit(c(0.5, 1, 0, 0.2), "inches")
+      ) 
 }
 
 
-# AVERAGE PACE OVER YEARS ####
+
+
+# AVERAGE NBA PACE TREND ####
 
 # NBA RS advanced stats url --> pace data
 'https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&Height=&ISTRound=&LastNGames=0&LeagueID=00&Location=&MeasureType=Advanced&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlayerExperience=&PlayerPosition=&PlusMinus=N&Rank=N&Season=2023-24&SeasonSegment=&SeasonType=Regular%20Season&ShotClockRange=&StarterBench=&TeamID=0&TwoWay=0&VsConference=&VsDivision='
@@ -70,7 +71,7 @@ headers <- c(
 ### Scraping function depending on season (season format: 2023-24)
 ### PACE Function ----
 
-pace <- function(season) {
+advanced <- function(season) {
   
   # Custom url dependent on NBA RS 
   url <- paste0('https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&Height=&ISTRound=',
@@ -91,7 +92,7 @@ pace <- function(season) {
   pace_data$Season <- season
   
   # Removes not necessary columns
-  pace_data <- pace_data[, - c(8, 10:23, 25, 27:46)]
+  # pace_data <- pace_data[, - c(8, 10:23, 25, 27:46)]
   
   return(pace_data)
  
@@ -104,20 +105,20 @@ pace <- function(season) {
 year <- paste0(1996:2023, '-', substr(1997:2024, 3, 4))
 
 # Maps all single dataframes into one 
-df <- map_df(year, pace)
+adv_stats <- map_df(year, advanced)
 
 
 
 ## Load Dataset ====
-df <- read.csv("/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Average_Pace_YoY.csv") %>% 
-  .[, -1]
+pace_stats <- read.csv("/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Advanced_All.csv") %>% 
+  .[, - c(8, 10:23, 25, 27:46)]
 
 
 # Convert pace data to numeric 
-df$PACE <- as.numeric(df$PACE)
+pace_stats$PACE <- as.numeric(pace_stats$PACE)
 
 # New dataframe with Season and League Average Pace 
-avg_pace <- df %>% 
+avg_pace <- pace_stats %>% 
   group_by(Season) %>% 
   summarise(avg_pace = mean(PACE)) %>% 
   mutate(Season = factor(Season, levels = unique(Season)))
@@ -132,7 +133,7 @@ avg_pace$year <- avg_pace$year + 1
 
 
 
-### PLOT ----
+### Plot ----
 
 ggplot(
     avg_pace, 
@@ -190,7 +191,7 @@ ggsave('/Users/davidetissino/Desktop/Pace.png', dpi = 'retina', width = 9, heigh
 #### --------------- ###
 
 
-# PER POSSESSION DATA ####
+# AVERAGE SECONDS / POSS. TREND ####
 
 ## Per Possession Function ----
 
@@ -223,28 +224,29 @@ per_poss <- function(season) {
 year <- 1996:2023
 
 # Maps all single dataframes into one 
-df <- map_df(year, per_poss)
+per_poss_stats <- map_df(year, per_poss)
 
 
 ## Load Dataset ----
-df <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Per_Possession_All.csv') 
+per_poss_stats <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Per_Possession_All.csv') 
+
 
 # remove not necessary columns
-df <- df[, -c(1, 7:23)]
+per_poss_stats <- per_poss_stats[, -c(1, 7:23)]
 
 # change column names
-colnames(df)[4] <- 'seconds_per'
-colnames(df)[5] <- 'league_rank'
+colnames(per_poss_stats)[4] <- 'seconds_per'
+colnames(per_poss_stats)[5] <- 'league_rank'
 
 # Create single dataframe with Season & Average Seconds 
-avg_seconds <- df %>% 
+avg_seconds <- per_poss_stats %>% 
   group_by(Season) %>% 
   summarise(avg_seconds = mean(seconds_per)) %>% 
   mutate(Season = factor(Season, levels = unique(Season)),
-         year = unique(df$Year))
+         year = unique(per_poss_stats$Year))
 
 
-## PLOT ----
+## Plot ----
 
 ggplot(
   avg_seconds, 
@@ -272,7 +274,6 @@ ggplot(
     axis.title.y = element_text(color = 'black', margin = margin(r = 25, l = 15), family = 'K2D', face = 'bold', size = 19), 
     axis.text = element_text(color = 'grey40'),
     plot.caption = element_text(margin = margin(b = 20))
-    
   ) + 
   labs(
     x = 'NBA Regular Season', 
@@ -296,4 +297,232 @@ ggsave('/Users/davidetissino/Desktop/Per.png', dpi = 'retina', width = 9, height
 
 
 
+#### ----------------- ###
+# SHOTS ATT. & SECONDS / POSS. TREND ####
 
+
+# NBA RS advanced stats url --> pace data
+'https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&Height=&ISTRound=&LastNGames=0&LeagueID=00&Location=&MeasureType=Advanced&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlayerExperience=&PlayerPosition=&PlusMinus=N&Rank=N&Season=2023-24&SeasonSegment=&SeasonType=Regular%20Season&ShotClockRange=&StarterBench=&TeamID=0&TwoWay=0&VsConference=&VsDivision='
+
+# headers
+headers <- c(
+  `Connection` = 'keep-alive',
+  `Accept` = 'application/json, text/plain, */*',
+  `x-nba-stats-token` = 'true',
+  `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
+  `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+  `x-nba-stats-origin` = 'stats',
+  `Sec-Fetch-Site` = 'same-origin',
+  `Sec-Fetch-Mode` = 'cors',
+  `Referer` = 'https://stats.nba.com/players/shooting/',
+  `Accept-Encoding` = 'gzip, deflate, br',
+  `Accept-Language` = 'en-US,en;q=0.9'
+)
+
+
+
+### Scraping function depending on season (season format: 2023-24)
+### Traditional Stats Function ----
+
+traditional <- function(season) {
+  
+  # Custom url dependent on NBA RS 
+  url <- paste0('https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&Height=&ISTRound=&LastNGames=0&LeagueID=00&Location=&MeasureType=Base&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlayerExperience=&PlayerPosition=&PlusMinus=N&Rank=N&Season=',
+                season,
+                '&SeasonSegment=&SeasonType=Regular%20Season&ShotClockRange=&StarterBench=&TeamID=0&TwoWay=0&VsConference=&VsDivision=')
+    
+  res <- GET(url = url, add_headers(.headers=headers))
+  
+  json_resp <- fromJSON(content(res, "text"))
+  
+  trad_data <- data.frame(json_resp$resultSets$rowSet)
+  
+  colnames(trad_data) <- json_resp[["resultSets"]][["headers"]][[1]]
+  
+  # Adds specific column indicating season
+  trad_data$Season <- season
+  
+  return(trad_data)
+  
+}
+
+
+# Vector of years since 1996, with correct format for url (2023-24)
+year <- paste0(1996:2023, '-', substr(1997:2024, 3, 4))
+
+# Maps all single dataframes into one 
+trad_stats <- map_df(year, traditional)
+
+
+
+# Load Datasets ####
+
+## Traditional Dataset ====
+trad_stats <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Traditional_All.csv') 
+
+
+## Per Possession Dataset ====
+per_poss_stats <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Per_Possession_All.csv') 
+per_poss_stats <- per_poss_stats[, -c(1, 6:24)]
+colnames(per_poss_stats)[4] <- 'seconds_per'
+
+
+#### Teams Data, Slugs, Colors ----
+tms <- read.csv('/Users/davidetissino/Desktop/R/data/teams.csv') %>% 
+  .[, -c(4:6)]
+
+
+
+#### Historical Franchises ----
+# headers
+headers <- c(
+  `Connection` = 'keep-alive',
+  `Accept` = 'application/json, text/plain, */*',
+  `x-nba-stats-token` = 'true',
+  `X-NewRelic-ID` = 'VQECWF5UChAHUlNTBwgBVw==',
+  `User-Agent` = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.87 Safari/537.36',
+  `x-nba-stats-origin` = 'stats',
+  `Sec-Fetch-Site` = 'same-origin',
+  `Sec-Fetch-Mode` = 'cors',
+  `Referer` = 'https://stats.nba.com/players/shooting/',
+  `Accept-Encoding` = 'gzip, deflate, br',
+  `Accept-Language` = 'en-US,en;q=0.9'
+)
+
+
+url <- 'https://stats.nba.com/stats/franchisehistory?LeagueID=00&Season=2023-24'
+
+res <- GET(url = url, add_headers(.headers = headers))
+
+resp <- fromJSON(content(res, 'text'))
+
+franchises <- data.frame(resp$resultSets$rowSet[[1]])
+
+colnames(franchises) <- resp[['resultSets']][['headers']][[1]]
+
+
+# keep inactive teams relative to our time frame 
+franchises <- franchises %>% 
+  filter(
+    franchises$END_YEAR >= 1996,
+    franchises$END_YEAR < 2023
+  )
+
+# keep only relevant columns 
+franchises <- franchises[, c(2:6)]
+
+# merge city and name into one 
+franchises$team <- paste(franchises$TEAM_CITY, franchises$TEAM_NAME)
+
+# add missing slugs 
+franchises$slugTeam <- c('NJN', 'CHH', 'LAC', 'VAN', 'NOH', 'NOK', 'SEA', 'WAS')
+
+# remove columns to merge 
+franchises <- franchises[, -c(2:5)]
+
+colnames(franchises)[1] <- 'idTeam'
+
+# merge into one 
+teams <- rbind(tms, franchises)
+
+teams <- teams[-33, ]
+
+
+
+# Prepare Datasets ====
+
+## Traditional Dataset ----
+# create one total Shot Attempted column
+trad_stats$SA <- trad_stats$FGA + trad_stats$FG3A
+
+# remove some columns
+trad_stats <- trad_stats[, -c(7, 8, 11, 14:54)]
+
+# appropriate year column (EG: 1996 for 1996-97 NBA RS)
+trad_stats$year <- gsub('-.*', '', trad_stats$Season) %>% 
+  as.numeric(trad_stats$year)
+
+trad_stats$year <- trad_stats$year + 1
+
+# to merge
+colnames(trad_stats)[2] <- 'team'
+
+trad_stats$team[trad_stats$team == 'LA Clippers'] <- 'Los Angeles Clippers'
+
+
+###### TRADITIONAL + TEAMS ====
+# merge traditional stats (trad_stats) w/ teams info/slugs
+traditional_all <- merge(trad_stats, teams, by = 'team') %>%
+  .[, -2] %>% 
+  .[c(1, 14, 13, 12, 2:9, 11, 10)]
+
+# create unique ID for each historical team to merge 
+# ID = teamID + '_' + slug + '_' + season
+# EG: 1996-97 Atlanta Hawks ATL --> 1610612737_ATL_97
+traditional_all$unique_ID <- paste0(traditional_all$idTeam, '_', traditional_all$year)
+
+
+## Per Possession Dataset ----
+colnames(per_poss_stats)[1] <- 'slugTeam'
+
+###### PER POSSESSION + TEAMS =====
+per_poss_all <- merge(per_poss_stats, teams, by = 'slugTeam')
+
+# remove rows (all Washington Bullets after 1997)
+per_poss_all <- per_poss_all %>% 
+  filter(
+    team != 'Washington Bullets', 
+    Year >= 1997
+  ) %>% 
+  .[c(7, 1, 6, 5, 2:4)]
+
+# unique ID
+per_poss_all$unique_ID <- paste0(per_poss_all$idTeam, '_', per_poss_all$Year)
+
+
+### TRADITIONAL + PER POSS. ####
+final <- merge(per_poss_all, traditional_all, by = 'unique_ID')
+
+# keep only relevant columns
+final <- final[, -c(3:6, 9:11)]
+
+
+
+
+ggplot(
+  final, 
+  aes(
+    x = seconds_per, 
+    y = FGA
+    )
+  ) + 
+  geom_point(
+    shape = 21, 
+    color = 'black', 
+    fill = 'dodgerblue', 
+    size = 3.5
+  ) + 
+  geom_smooth(
+    method = 'lm', 
+    color = 'firebrick'
+  ) +
+  theme_davide() +
+  theme(
+    plot.caption = element_text(margin = margin(b = 15))
+  ) +
+  labs(
+    x = 'Seconds per Possession', 
+    y = 'Field Goals Attempted', 
+    title = 'FGA vs. Seconds Per Possession', 
+    caption = 'Source: stats.nba.com, inpredictable.com'
+  )
+  
+
+ggsave('/Users/davidetissino/Desktop/FGA_Seconds1.png', dpi = 'retina', width = 11, height = 9)
+
+    
+    
+    
+    
+    
+    
