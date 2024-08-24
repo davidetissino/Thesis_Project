@@ -110,7 +110,7 @@ adv_stats <- map_df(year, advanced)
 
 
 ## Load Dataset ====
-pace_stats <- read.csv("/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Advanced_All.csv") %>% 
+adv_stats <- read.csv("/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Advanced_All.csv") %>% 
   .[, - c(8, 10:23, 25, 27:46)]
 
 
@@ -322,7 +322,7 @@ headers <- c(
 
 
 ### Scraping function depending on season (season format: 2023-24)
-### Traditional Stats Function ----
+# Traditional Stats Function ====
 
 traditional <- function(season) {
   
@@ -356,6 +356,29 @@ trad_stats <- map_df(year, traditional)
 
 
 # Load Datasets ####
+library(tidyverse)
+library(jsonlite)
+library(httr)
+library(ggplot2)
+library(ggthemes)
+
+# custom theme
+theme_davide <- function() {
+  theme_fivethirtyeight(base_family = 'avenir') %+replace%  
+    theme(
+      text = element_text(family='PT Mono'),
+      axis.title.x = element_text(color = 'black', margin = margin(t = 30, b =25), family = 'K2D', face = 'bold', size = 19), 
+      axis.title.y = element_text(angle = 90, color = 'black', margin = margin(r = 25, l = 15), family = 'K2D', face = 'bold', size = 19), 
+      axis.text = element_text(color = 'grey40', face = 'bold', size = 13),
+      panel.background = element_rect('grey98'), 
+      plot.background = element_rect('grey98'),
+      plot.title = element_text(margin = margin(b=30, t = 10), size = 35, hjust = 0.6, family = 'Proxima Nova', face = 'bold'),
+      plot.subtitle=element_text(size=12, hjust = 0, vjust = -1), 
+      panel.grid.major = element_line(color='grey80', linetype = 'dashed'),
+      plot.margin = unit(c(0.5, 1, 0, 0.2), "inches")
+    ) 
+}
+
 
 ## Traditional Dataset ====
 trad_stats <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Traditional_All.csv') 
@@ -506,6 +529,13 @@ ggplot(
     method = 'lm', 
     color = 'firebrick'
   ) +
+  geom_text(
+    label = 'FGA = 143.03 - 3.96 * (Seconds Per Possession)',
+    x = 14, 
+    y = 71, 
+    size = 4,
+    fontface = 'bold'
+  ) +
   theme_davide() +
   theme(
     plot.caption = element_text(margin = margin(b = 15))
@@ -522,7 +552,53 @@ ggsave('/Users/davidetissino/Desktop/FGA_Seconds1.png', dpi = 'retina', width = 
 
     
     
-    
-    
+
+
+library(corrplot)
+
+# Load Datasets
+adv_stats <- read.csv("/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Advanced_All.csv")
+trad_stats <- read.csv('/Users/davidetissino/Desktop/Last/Tesi/Thesis/Datasets/Teams_Traditional_All.csv') 
+
+# add unique ID columns 
+adv_stats$unique_ID <- paste0(adv_stats$TEAM_ID, '_', adv_stats$Season)
+trad_stats$unique_ID <- paste0(trad_stats$TEAM_ID, '_', trad_stats$Season)
+
+
+
+# traditional NO ranking
+trad_NoRank <- trad_stats[, -c(1:5, 7, 8, 11, 14, 19, 24:26, 29:56)]
+
+# traditional NO rank correlations
+corrplot(cor(trad_NoRank), method = 'color', addCoef.col = 'black', 
+         col = colorRampPalette(c("dodgerblue", "white", "firebrick3"))(100),
+         tl.col = 'black', tl.cex = 4)
+
+
+# traditional WITH ranking
+trad_rank <- trad_stats[, -c(1:31, 33:35, 37:38, 40:43, 45, 48:52, 55)]
+
+# keep only pace rank and unique ID
+pace_rank <- adv_stats[, -c(1:44, 46, 47)]
+
+# merge pace rank to traditional stats ranks
+ranks <- merge(trad_rank, pace_rank, by = 'unique_ID') %>% 
+  .[, -c(1, 2)]
+
+# rearrange columns
+ranks <- ranks[, c(8, 6, 1:5, 7)]
+
+# correlation of RANKS 
+corrplot(cor(ranks), method = 'color', addCoef.col = 'black', 
+         col = colorRampPalette(c("dodgerblue", "white", "firebrick3"))(100),
+         tl.col = 'black')
+
+
+
+
+
+
+
+
     
     
