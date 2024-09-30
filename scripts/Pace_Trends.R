@@ -551,4 +551,7 @@ ggplot(
 ggsave('/Users/davidetissino/Desktop/FGA_Seconds1.png', dpi = 'retina', width = 11, height = 9)
 
     
-    
+
+
+
+

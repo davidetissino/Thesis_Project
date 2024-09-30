@@ -1,0 +1,1024 @@
+# Analysis
+
+## Exploratory data analysis
+
+```{r message=FALSE, warning=FALSE}
+library(dendextend)
+library(factoextra)
+library(GGally)
+library(ggfortify)
+library(ggrepel)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(mclust)
+library(NbClust)
+library(plyr)
+library(tidyverse)
+library(ggthemes)
+library(tictoc)
+# set for reproducible results
+set.seed(14)
+# set theme for ggplot
+theme_set(theme_minimal())
+# clear variables
+rm(list = ls())
+
+# Load custom theme
+theme_davide <- function() {
+  theme_fivethirtyeight(base_family = 'avenir') %+replace%  
+    theme(
+      text = element_text(family='Pt Mono'), 
+      axis.title.x = element_text(color = 'black', margin = margin(t = 30, b = 8), family = 'K2D', face = 'bold', size = 19), 
+      axis.title.y = element_text(color = 'black', margin = margin(r = 25, l = 8), family = 'K2D', face = 'bold', size = 19, angle = 90), 
+      axis.text = element_text(color = 'grey30'),
+      axis.text.x = element_text(face='bold', size = 13),
+      axis.text.y = element_text(face='bold', size = 13), 
+      panel.background = element_rect('grey98'), 
+      plot.background = element_rect('grey98'),
+      plot.title = element_text(margin = margin(b=15, t = 10), face='bold', size=30, hjust = 0.5, family = 'Proxima Nova'),
+      plot.subtitle=element_text(size=15, hjust = 0, margin = margin(b = 10), family = 'Proxima Nova'), 
+      panel.grid.major = element_line(color='gray80', linetype = 'dashed'),
+      plot.margin = unit(c(0.5, 1, 0, 0.2), "inches"), 
+    ) 
+}
+```
+
+We decided to use the 14 features in our analysis (on a per game basis) because they provide a good balance of offensive (e.g Pts, Ast) and defensive stats (e.g. Reb, Blk). This is more likely to provide more balanced groupings between those who are more offensive and those who are better at defense.
+
+With these features, we will explore the distribution of each future by plot the distributions of key per game stats.
+
+```{r}
+# load data
+nba <- read.csv('/Users/davidetissino/Desktop/Tesi/Thesis/Datasets/Model_clean_stats.csv')
+
+# replace NA values in RPM column with 0s
+nba$BPM[is.na(nba$RPM)] <- 0
+```
+
+
+```{r echo=FALSE}
+# plot distributions of key per game stats
+# grep matches all the _pg columns into one dataframe nba_feat
+features_pg <- grep('_pg', names(nba), value = TRUE)
+nba_feat <- nba[ , features_pg]
+
+# plots densities of per game stats
+nba_feat %>% 
+  pivot_longer(cols = everything()) %>%
+  ggplot(aes(x = value)) +
+  geom_density() +
+  facet_wrap(~name, scales = "free") + 
+  labs(title = 'Feature densities (un-transformed)', 
+       x = '')
+```
+
+Variance was examined to provide a numerical estimate of the spread of each feature to determine if scaling is necessary. As an exploratory analysis, bi-variate comparisons were made between all features to determine if there are any groupings between variables. A subset of the features is presented below.
+
+```{r echo=FALSE}
+# calculate variance of each per game stat
+var_table <- round(apply(nba_feat, MARGIN = 2, FUN = var), 2)
+
+var_df <- data.frame(var_table)
+
+colnames(var_df) <- 'Variance'
+
+# plot table of variance
+kable(t(var_df),
+      caption = 'Feature Variance', 
+      booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("striped", "scale_down"))
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+# look at pairs plots for key stats
+feat_plot <- c('MP_pg', 'PTS_pg', 'AST_pg', 'TRB_pg', 
+               'STL_pg', 'BLK_pg')
+nba_feat_plot_pos <- nba[ , feat_plot]
+
+```
+
+
+Due to the discrepancy in spread between features we decided to scale the data. Scaling each feature ensures that no single feature will dominate subsequent analyses as a result of the way the feature was measured. A good example is minutes and blocks per game - most players will have more minutes per game than blocks per game.
+
+```{r}
+# scale the per game stats
+nba_feat_sc <- scale(nba_feat)
+```
+
+
+## Principal component analysis
+
+Before running any clustering algorithms, we will perform principal component analysis to determine if there are any inherent groupings among players.
+
+The first two principal components explain the majority of the variance in the feature set. We will plot the data in these two dimensions to better assess player similarities.
+
+```{r}
+# run PCA on scaled per game stats
+# 
+nba_pca <- prcomp(nba_feat_sc)
+
+# each PC are the major stats
+# PC1 = Minutes
+# PC2 = Field Goals
+summary(nba_pca)
+```
+
+```{r}
+# distance matrix for features
+nba_dist_sc <- dist(nba_feat_sc, method = 'euclidean')
+  
+# try single, centroid, and ward (D2) linkage hier clustering
+hcl_single <- hclust(d = nba_dist_sc, method = 'single')
+hcl_single
+hcl_centroid <- hclust(d = nba_dist_sc, method = 'centroid')
+hcl_centroid
+hcl_ward <-  hclust(d = nba_dist_sc, method = 'ward.D2')
+hcl_ward
+```
+
+
+
+```{r}
+# create a function that will plot PCA
+plot_pca <- function(object, frame = FALSE, x = 1, y = 2, 
+                     data, colour, title, label) {#, leg_title) {
+  # plots data in PCA space 
+  # object = PCA or K-Means object
+  # x = which PC for x-axis (1, 2, ,3, etc..)
+  # y = which PC for y-axis (1, 2, 3, etc..)
+  # object: PCA or K-means object
+  # data = underlying data
+  p <- autoplot(nba_pca, x = x, y = y, data = nba, colour = colour, frame = frame) + 
+        ggtitle(title) +
+        # center title
+        theme(
+          plot.title = element_text(hjust = 0.5)
+          )# + 
+        # geom_label_repel(
+        #   aes(label = label),
+        #   box.padding   = 0.15, 
+        #   point.padding = 0.4,
+        #   segment.color = 'grey50'
+        #   )
+  ## This is supposed to override the autoplot legend title.
+    ## Only works when plotting PCA directly. Does not work for HCL and KM objects
+    #labs(colour = leg_title)
+  return(p)
+
+}
+
+
+```
+
+
+At first glance, there are differences between players based on overall statistics. For example, LeBron James and James Harden are near each other, indicating star players may be grouped together. There are also similarities based on player position. For example, Centers/Power Forwards such as Anthony Davis and Karl-Anthony Towns are in the bottom of the chart.
+
+Examining the PCA in three-dimensional space shows a 'cone' shape spread of the data similar to the two-dimensional  'fan' shape.
+
+```{r echo=FALSE}
+# Labels: Players who played more than 36 min per game or less than 3 min per game
+labels_pca <- ifelse(nba$MP_pg >= 36 | nba$MP_pg <= 2, 
+                    as.character(nba$Player), '')
+title_pca <- paste0('PCA: NBA - ', ncol(nba_feat) ,' features')
+
+# Plot first two components with positions
+plot_pca(nba_pca, data = nba, colour = 'Pos', 
+         label = labels_pca, title = title_pca) + 
+  geom_point(
+    shape = 21, 
+    size = 3, 
+    color = 'grey80')+ 
+  theme_davide() + 
+  theme(
+    legend.margin = margin(4, 4, 4, 4), 
+    legend.background = element_rect(fill = 'grey98'), 
+    legend.position = 'bottom',
+    plot.title = element_text(margin = margin(b=15, t = 10), size=30, hjust = 0.5, family = 'Proxima Nova', face = 'bold'),
+    plot.margin = margin(5, 0, 5, 0)
+    )#, leg_title = 'Position'
+
+
+# 
+ggsave('/Users/davidetissino/Desktop/PCA_features.png', dpi = 'retina', width = 9, height = 9)
+
+```
+
+
+
+
+
+### K-Means
+
+#### Optimize number of clusters
+
+Similar to the optimization for hierarchical, we found similar results for K-Means. We decided with the 4-cluster solution based on the Silhouette index (local maximum).  
+
+```{r}
+# get optimal cluster sizes 
+cluster_sizes_km_ch <- NbClust(data = nba_feat_sc,
+                          # it will likely be harder to interpret clusters
+                          # past this amount
+                          max.nc = 6,
+                          method = 'kmeans',
+                          index = 'ch')
+
+# get optimal cluster sizes 
+cluster_sizes_km_s <- NbClust(data = nba_feat_sc,
+                          # it will likely be harder to interpret clusters
+                          # past this amount
+                          max.nc = 6,
+                          method = 'kmeans',
+                          index = 'silhouette')
+```
+
+```{r echo=FALSE}
+par(mfrow = c(1,2))
+
+# plot C(G)
+plot(names(cluster_sizes_km_ch$All.index),
+     cluster_sizes_km_ch$All.index,
+     main = 'Calinski-Harabasz index: KM',
+     type = 'l',
+     xlab = "Cluster size",
+     ylab = "Index value")
+
+
+# plot C(G)
+plot(names(cluster_sizes_km_s$All.index),
+     cluster_sizes_km_s$All.index,
+     main = 'Silhouette Index',
+     type = 'l', 
+     xlab = 'Cluster size',
+     ylab = 'Index value')
+
+#ggsave('/Users/davidetissino/Desktop/Cluster_Sizing.png', dpi = 'retina', width = 9, height = 9)
+
+```
+
+
+#### K-means clustering with four groups
+
+Compared to the hierarchical solution presented earlier, there is cleaner separation in the K-Means plot. We will see how these clusters are separated by inspecting features within each group.
+
+```{r}
+# performs clustering on data matrix 
+# number of clusters determined before
+km_k <- 5
+
+
+km_four <- kmeans(x = nba_feat_sc,
+            centers = km_k,
+            nstart = 100,
+            algorithm = 'Hartigan-Wong')
+
+nba$km_labs_four <- factor(km_four$cluster)
+```
+
+
+```{r echo=FALSE}
+# swap labels 
+# those who are 4 will become 1 (subpar)
+# those who are 3 will necome 2 (below average)
+
+nba$km_cluster <- factor(
+  ifelse(nba$km_labs_four == 4, 1,
+         ifelse(nba$km_labs_four == 3, 2, 
+                ifelse(nba$km_labs_four == 2, 3, 
+                       ifelse(nba$km_labs_four == 1, 4, 
+                              5)))))
+
+```
+
+```{r echo=FALSE}
+# rearrange in appropriate order
+
+nba <- nba[, c(18, 1, 2, 40, 35, 3:6, 17, 7:10, 19, 20, 11:16, 21, 34, 22:33, 36:38 )]
+
+```
+
+
+```{r, echo=FALSE}
+# plot k-means clusters in PC space
+# Labels: Players who played more than 36 min per game or less than 3 min per game
+km_labels <- ifelse(nba$MP_pg >= 36 | nba$MP_pg <= 3, 
+                         as.character(nba$Player), '' )
+ 
+# Cluster Plot 
+plot_pca(
+  km_four,
+  data = nba,
+  frame = TRUE,
+  colour = 'km_cluster',
+  title = paste0(
+    km_k,
+    ' Clusters (K-means)'
+    )
+  ) +
+  theme_davide() + 
+  theme(
+    legend.margin = margin(4, 4, 4, 4), 
+    legend.background = element_rect(fill = 'grey98'), 
+    legend.position = 'bottom',
+    plot.title = element_text(margin = margin(b=15, t = 10), size=30, hjust = 0.4, family = 'Proxima Nova', face = 'bold'),
+    plot.margin = margin(5, 0, 5, 0)
+    )
+
+
+
+# ggsave('/Users/davidetissino/Desktop/Clusters.png', dpi = 'retina', width = 11, height = 9)
+
+```
+
+One explanation for the imbalanced number of players across clusters is that player skillset level is inherently imbalanced. This imbalance is reflected in the univariate plots, where most densities were positively skewed. This suggests that there a few players whose statistics significantly exceed those of the average player. This is also reflected in the average statistics by cluster shown below.
+
+```{r echo=FALSE}
+# Group by cluster and count total players in each 
+cluster_tot <- nba %>% 
+  group_by(
+    km_cluster
+  ) %>% 
+  summarise(
+    Count = n()
+  ) %>% 
+  ungroup()
+
+
+# Plot pie with players / total 
+ggplot(cluster_tot, aes(x = "", y = Count, fill = km_cluster)) +
+  ggtitle('Players in each Cluster ') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = Count
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 6) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  )
+
+# ggsave('/Users/davidetissino/Desktop/Players_in_clusters.png', dpi = 'retina', width = 9, height = 9)
+
+
+```
+
+Players in each position within each cluster
+
+```{r echo=FALSE}
+# Group by cluster (km_cluster) and position (Pos), then count players
+cluster_summary <- nba %>%
+  group_by(km_cluster, Pos) %>%  # Group by cluster and position
+  summarise(Count = n()) %>%  # Count number of players in each group
+  ungroup() %>%  # Ungroup for the next summarization
+  group_by(km_cluster) %>%  # Group by cluster again to add totals
+  mutate(Total_Players = sum(Count))  # Calculate total players in each cluster
+
+cluster_summary %>% 
+  kbl(
+    caption = 'K-Means Player Distribution'
+  ) %>% 
+  kable_styling(
+    latex_options = c('striped')
+  )
+
+```
+
+Players averages within each cluster 
+
+```{r echo=FALSE}
+# averages by cluster
+nba_km_avg <- nba %>%
+  # select(km_cluster, MP_pg, PTS_pg, TRB_pg,
+  #        AST_pg, BLK_pg, STL_pg, VORP, PER, RPM, ) %>%
+  group_by(km_cluster) %>% 
+  summarise_all(list(mean))
+
+
+# Average Stats by each Cluster
+nba_km_avg %>%
+  kbl(
+    aption = 'Average Stats by Cluster',
+      digits = 2
+  ) %>% 
+  kable_styling(
+    latex_options = c('striped', 'scale_down')
+  )
+
+```
+
+Player averages and total of cluster 
+
+```{r echo=FALSE}
+
+nba_km <- merge(
+  cluster_tot, 
+  nba_km_avg,
+  by = 'km_cluster'
+)
+
+
+
+nba_km %>%
+  kbl(
+    aption = 'Stats by Cluster',
+      digits = 2
+  ) %>% 
+  kable_styling(
+    latex_options = c('striped', 'scale_down')
+  )
+
+```
+
+
+```{r echo=FALSE}
+# Division of Positions within Cluster
+cluster_count <- nba_km[, c(1,2)]
+
+cluster_count$pct <- round(cluster_count$Count / sum(cluster_count$Count), 3) * 100
+  
+# Plot positions within cluster
+ggplot(cluster_count, aes(x = "", y = pct, fill = km_cluster)) +
+  ggtitle('Clusters Composition') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = pct
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = ) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  )
+
+# ggsave('/Users/davidetissino/Desktop/Cluster_Composition.png', dpi = 'retina', width = 9, height = 9)
+
+```
+
+
+
+## Final cluster selection
+K-Means (four clusters) was the optimal solution. Comparing the HCL and KM cluster plots (per above) reveals the K-Means produces clearer separation of players based on overall skillsets. 
+
+We validated this by comparing the clusters against advanced statistics. PER, VORP, and RPM are advanced statistics commonly used to assess general player performance. None of these statistics were used in the cluster modeling. 
+
+```{r echo=FALSE}
+# Plots advanced statistics for clusters
+nba_km_avg %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, VORP, PER, RPM) %>%
+  pivot_longer(cols = c("VORP", "PER", "RPM")) %>%
+  ggplot(aes(x = km_cluster, y = value, fill = km_cluster)) +
+  geom_col() +
+  facet_wrap(~name, scales = 'free') +
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Advanced Statistics',
+    x = 'Cluster',
+    y = 'Advanced Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  )
+
+
+# ggsave('/Users/davidetissino/Desktop/Clusters_Adv_Stats.png', dpi = 'retina', width = 9, height = 9)
+
+
+
+```
+
+
+
+```{r echo=FALSE}
+# Plots PTS, REB and AST for clusters
+nba_km_avg %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, PTS_pg, TRB_pg, AST_pg) %>%
+  pivot_longer(cols = c("PTS_pg", "TRB_pg", "AST_pg")) %>%
+  ggplot(aes(x = km_cluster, y = value, fill = km_cluster)) +
+  geom_col() +
+  facet_wrap(~name, scales = 'free') +
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional Statistics',
+    x = 'Cluster',
+    y = 'Traditional Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  )
+
+# ggsave('/Users/davidetissino/Desktop/Clusters_Trad_Stats.png', dpi = 'retina', width = 9, height = 9)
+
+
+
+```
+
+ANALYSIS OF EACH CLUSTER
+
+STAR PLAYERS
+
+```{r echo=FALSE}
+## Specific plot for CLUSTER = 5, STARS
+
+nba_stars <- nba_km_avg[5 ,]
+
+nba_stars <- nba_stars %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, FGA_pg, X3PA_pg, STL_pg, BLK_pg, AST_pg, TRB_pg, PER, BPM, VORP, PTS_pg) %>%
+  pivot_longer(cols = c("FGA_pg", "X3PA_pg", "STL_pg", 'BLK_pg', 'AST_pg', 'TRB_pg', 'PER', 'BPM', 'VORP', 'PTS_pg'))
+
+             
+
+nba_stars$name <- factor(nba_stars$name, levels = c('PTS_pg', 'TRB_pg', 'AST_pg', 'STL_pg', 'BLK_pg', 'X3PA_pg', 'FGA_pg', 'RPM', 'VORP', 'PER'))  
+               
+nba_stars %>%
+  ggplot(aes(x = name, y = value), fill = 'red') +
+  geom_col() +
+  geom_label(
+    aes(label = round(value, 1)),
+    fontface = 'bold', 
+    color = 'black',
+    fill = 'grey90',
+    size = 7, 
+    position = position_stack(vjust = 0.5)
+  ) +
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional and Advanced Statistics',
+    x = 'Cluster 5: Stars',
+    y = 'Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  ) +
+  scale_fill_brewer(palette="Set1")
+
+
+
+
+```
+
+```{r echo=FALSE}
+# Division of Positions within Cluster
+cluster_summ_stars <- cluster_summary %>% 
+  filter(
+    km_cluster == 5
+  )
+  
+# Plot positions within cluster
+ggplot(cluster_summ_stars, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 5: All-Stars') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = paste0(Count, ' - ', Pos)
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 10) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  )
+
+# ggsave('/Users/davidetissino/Desktop/All-Stars_Positions.png', dpi = 'retina', width = 9, height = 9)
+
+```
+
+ROLE PLAYERS
+
+```{r echo=FALSE}
+## Specific plot for CLUSTER = 4, ROLE
+
+nba_role <- nba_km_avg[4 ,]
+
+nba_role <- nba_role %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, FGA_pg, X3PA_pg, STL_pg, BLK_pg, AST_pg, TRB_pg, PER, BPM, VORP, PTS_pg) %>%
+  pivot_longer(cols = c("FGA_pg", "X3PA_pg", "STL_pg", 'BLK_pg', 'AST_pg', 'TRB_pg', 'PER', 'BPM', 'VORP', 'PTS_pg'))
+
+             
+nba_role$name <- factor(nba_role$name, levels = c('PTS_pg', 'TRB_pg', 'AST_pg', 'STL_pg', 'BLK_pg', 'X3PA_pg', 'FGA_pg', 'RPM', 'VORP', 'PER'))  
+               
+nba_role %>%
+  ggplot(aes(x = name, y = value, fill = km_cluster)) +
+  geom_col() +
+  geom_label(
+    aes(label = round(value, 1)),
+    fontface = 'bold', 
+    color = 'black',
+    fill = 'grey90',
+    size = 7, 
+    position = position_stack(vjust = 0.5)
+  ) +
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional and Advanced Statistics',
+    x = 'Cluster 4: Rim-Centric Players',
+    y = 'Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  ) 
+
+
+```
+
+```{r echo=FALSE}
+# Division of Positions within Cluster
+cluster_summ_role <- cluster_summary %>% 
+  filter(
+    km_cluster == 4
+  )
+  
+# Plot positions within cluster
+ggplot(cluster_summ_role, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 4: Rim-Centric Players') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = ifelse(
+        Count == 1, '',  paste0(Count, ' - ', Pos)
+      )
+    ),
+  position = position_stack(vjust = 0.5),
+  color = 'white', 
+  fontface = 'bold', 
+  size = 10) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+# ggsave('/Users/davidetissino/Desktop/Rim-Centric_Positions.png', dpi = 'retina', width = 9, height = 9)
+
+
+```
+
+BENCH PLAYERS
+
+```{r echo=FALSE}
+## Specific plot for CLUSTER = 3, BENCH
+
+nba_bench <- nba_km_avg[3 ,]
+
+nba_bench <- nba_bench %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, FGA_pg, X3PA_pg, STL_pg, BLK_pg, AST_pg, TRB_pg, PER, BPM, VORP, PTS_pg) %>%
+  pivot_longer(cols = c("FGA_pg", "X3PA_pg", "STL_pg", 'BLK_pg', 'AST_pg', 'TRB_pg', 'PER', 'BPM', 'VORP', 'PTS_pg'))
+
+             
+
+nba_bench$name <- factor(nba_bench$name, levels = c('PTS_pg', 'TRB_pg', 'AST_pg', 'STL_pg', 'BLK_pg', 'X3PA_pg', 'FGA_pg', 'BPM', 'VORP', 'PER'))  
+               
+nba_bench %>%
+  ggplot(aes(x = name, y = value, fill = km_cluster)) +
+  geom_col() +
+  geom_label(
+    aes(label = round(value, 1)),
+    fontface = 'bold', 
+    color = 'black',
+    fill = 'grey90',
+    size = 7, 
+    position = position_stack(vjust = 0.5)
+  ) + 
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional and Advanced Statistics',
+    x = 'Cluster 3: Second Options',
+    y = 'Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  ) 
+
+# ggsave('/Users/davidetissino/Desktop/Bench_Positions.png', dpi = 'retina', width = 9, height = 9)
+
+```
+
+
+```{r echo=FALSE}
+
+# Division of Positions within Cluster
+cluster_summ_bench <- cluster_summary %>% 
+  filter(
+    km_cluster == 3
+  )
+  
+# Plot positions within cluster
+ggplot(cluster_summ_bench, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 3: Second Options') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = ifelse(
+        Pos == 'C', 
+        '', 
+        paste0(Count, ' - ', Pos)
+      )
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 10) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+# 
+ggsave('/Users/davidetissino/Desktop/Second_Options_Positions.png', dpi = 'retina', width = 9, height = 9)
+
+
+```
+
+UNDERPERFORMING PLAYERS
+
+```{r echo=FALSE}
+## Specific plot for CLUSTER = 2, UNDERPERFORMING
+
+nba_below_avg <- nba_km_avg[2 ,]
+
+nba_below_avg <- nba_below_avg %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, FGA_pg, X3PA_pg, STL_pg, BLK_pg, AST_pg, TRB_pg, PER, BPM, VORP, PTS_pg) %>%
+  pivot_longer(cols = c("FGA_pg", "X3PA_pg", "STL_pg", 'BLK_pg', 'AST_pg', 'TRB_pg', 'PER', 'BPM', 'VORP', 'PTS_pg'))
+
+             
+
+nba_below_avg$name <- factor(nba_below_avg$name, levels = c('PTS_pg', 'TRB_pg', 'AST_pg', 'STL_pg', 'BLK_pg', 'X3PA_pg', 'FGA_pg', 'BPM', 'VORP', 'PER'))  
+               
+nba_below_avg %>%
+  ggplot(aes(x = name, y = value, fill = km_cluster)) +
+  geom_col() +
+  geom_label(
+    aes(label = round(value, 1)),
+    fontface = 'bold', 
+    color = 'black',
+    fill = 'grey90',
+    size = 7, 
+    position = position_stack(vjust = 0.5)
+  ) + 
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional and Advanced Statistics',
+    x = 'Cluster 2: Underperforming Players',
+    y = 'Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  ) 
+
+```
+
+```{r echo=FALSE}
+# Division of Positions within Cluster
+cluster_summ_below <- cluster_summary %>% 
+  filter(
+    km_cluster == 2
+  )
+  
+# Plot positions within cluster
+ggplot(cluster_summ_below, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 2: Underperforming Players') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = paste0(Count, ' - ', Pos)
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 6) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+# ggsave('/Users/davidetissino/Desktop/Underperforming_Positions.png', dpi = 'retina', width = 9, height = 9)
+
+
+```
+
+LOW-TIER PLAYERS
+
+```{r echo=FALSE}
+## Specific plot for CLUSTER = 1, LOW-TIER
+
+nba_subpar <- nba_km_avg[1 ,]
+
+nba_subpar <- nba_subpar %>%
+  # Reorder km_labs_four factor levels
+  select(km_cluster, FGA_pg, X3PA_pg, STL_pg, BLK_pg, AST_pg, TRB_pg, PER, BPM, VORP, PTS_pg) %>%
+  pivot_longer(cols = c("FGA_pg", "X3PA_pg", "STL_pg", 'BLK_pg', 'AST_pg', 'TRB_pg', 'PER', 'BPM', 'VORP', 'PTS_pg'))
+
+             
+
+nba_subpar$name <- factor(nba_subpar$name, levels = c('PTS_pg', 'TRB_pg', 'AST_pg', 'STL_pg', 'BLK_pg', 'X3PA_pg', 'FGA_pg', 'BPM', 'VORP', 'PER'))  
+               
+nba_subpar %>%
+  ggplot(aes(x = name, y = value, fill = km_cluster)) +
+  geom_col() +
+  geom_label(
+    aes(label = round(value, 1)),
+    fontface = 'bold', 
+    color = 'black',
+    fill = 'grey90',
+    size = 7, 
+    position = position_stack(vjust = 0.5)
+  ) + 
+  labs(
+    title = 'Overall Player Performance by Cluster',
+    subtitle = 'Average Traditional and Advanced Statistics',
+    x = 'Cluster 1: Low-Tier Players',
+    y = 'Statistic Value'
+  ) + 
+  theme_davide() + 
+  theme(
+    plot.subtitle = element_text(margin = margin(b = 10)), 
+    legend.position = 'none',
+    strip.text = element_text(face = 'bold', size = 15)
+  ) 
+
+```
+
+```{r echo=FALSE}
+# Division of Positions within Cluster
+cluster_summ_subpar <- cluster_summary %>% 
+  filter(
+    km_cluster == 1
+  )
+  
+# Plot positions within cluster
+ggplot(cluster_summ_subpar, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 1: Low-Tier Players') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = paste0(Count, ' - ', Pos)
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 6) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+
+```
+
+
+```{r echo=FALSE}
+par(mfrow = c(3,2))
+
+ggplot(cluster_summ_subpar, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 1: Low-Tier Players') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = paste0(Count, ' - ', Pos)
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 6) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+
+ggplot(cluster_summ_below, aes(x = "", y = Count, fill = Pos)) +
+  ggtitle('Cluster 2: Underperforming Players') +
+  geom_col(color = "black") +
+  geom_text(
+    aes(
+      label = paste0(Count, ' - ', Pos)
+    ),
+    position = position_stack(vjust = 0.5),
+    color = 'white', 
+    fontface = 'bold', 
+    size = 6) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("#BE2A3E", "#EC754A",
+                               "#FFC125", "#3C8D53", '#4876FF'))+
+  theme_davide() +
+  theme(
+    axis.title.y = element_blank(), 
+    axis.title.x = element_blank(),
+    legend.position = 'bottom', 
+    legend.direction = 'horizontal', 
+    legend.margin = margin(3, 3, 3, 3), 
+    plot.margin = margin(t = 15, b = 25), 
+    legend.text = element_text(size = 13)
+  ) 
+
+
+
+
+
+
+```
+
